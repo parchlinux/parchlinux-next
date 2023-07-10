@@ -1,10 +1,8 @@
 name: Build ISO
-
 on:
   push:
     tags:
       - '*'
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -12,86 +10,63 @@ jobs:
       image: archlinux:latest
       options: --privileged
     outputs:
-      iso_path: ${{ steps.create-iso.outputs.iso-path }}
-      iso_hash: ${{ steps.create-iso.outputs.iso-hash }}
-
+      hash: ${{ steps.hash.outputs.hash }}
+      iso: ${{ github.workspace }}/out/*.iso
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
-
+      - uses: actions/checkout@v2
       - name: Install Packages via Pacman
-        run: |
-          pacman -Syu archiso reflector rsync curl --noconfirm
-          reflector --verbose --country 'United States' -l 5 --sort rate --save /etc/pacman.d/mirrorlist
-
-      - name: Build ISO
-        id: create-iso
+        run: pacman -Syu archiso reflector rsync curl --noconfirm
+      - name: Change Arch docker mirror
+        run: reflector --verbose --country 'United States' -l 5 --sort rate --save /etc/pacman.d/mirrorlist
+      - name: Build image
         run: mkarchiso -v iso/
-
-      - name: Generate ISO Hash
+      - name: generate hash
         id: hash
-        run: echo "::set-output name=iso-hash::$(sha256sum ${GITHUB_WORKSPACE}/iso/out/*.iso | cut -d ' ' -f1)"
-
-      - name: Set ISO Path Output
-        id: set-iso-path
-        run: echo "::set-output name=iso-path::${GITHUB_WORKSPACE}/iso/out/"
-
-      - name: Upload ISO Artifact
-        uses: actions/upload-artifact@v2
+        run: echo "hash=$(sha256sum ${{ github.workspace }}/out/*.iso | cut -d ' ' -f1)" >> $GITHUB_ENV
+      - uses: actions/upload-artifact@v2
         with:
-          name: archlinux.iso
-          path: ${{ needs.build.outputs.iso_path }}/*.iso
-
+          name: iso
+          path: ${{ github.workspace }}/out/*.iso
   create-release:
-    needs: [build]
+    needs: ['build']
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
-      - name: Download ISO Artifact
+      - name: Download ISO artifact
         uses: actions/download-artifact@v2
         with:
-          name: archlinux.iso
-          path: iso
-
-      - name: Get ISO Hash
-        id: get-iso-hash
+          name: iso
+      - name: Extract ISO file name
+        id: iso_name
+        run: echo "::set-output name=name::$(basename ${{ github.workspace }}/out/*.iso)"
+      - name: Generate SHA256 hash
+        id: hash
         run: |
-          echo "::set-output name=iso-hash::$(sha256sum ${GITHUB_WORKSPACE}/iso/*.iso | cut -d ' ' -f1)"
-
+          sha256="$(sha256sum ${{ github.workspace }}/out/*.iso)"
+          echo "::set-output name=hash::$(echo $sha256 | cut -d ' ' -f1)"
       - name: Create Release
         uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref }}
-          release_name: ${{ github.ref }}
-          draft: false
-          prerelease: false
-
-      - name: Upload ISO to Release
+          release_name: Release ${{ github.ref }}
+          draft: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload ISO
         uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ steps.create-release.outputs.upload_url }}
-          asset_path: ${{ github.workspace }}/iso/*.iso
-          asset_name: archlinux.iso
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ github.workspace }}/out/*.iso
+          asset_name: ${{ steps.iso_name.outputs.name }}
           asset_content_type: application/octet-stream
-
-      - name: Add ISO Hash to Release Description
-        uses: actions/github-script@v4
+          asset_label: ${{ steps.iso_name.outputs.name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          script: |
-            const hash = '${{ needs.create-release.outputs.iso-hash }}';
-            const context = github.context;
-            const octokit = github.getOctokit(process.env.GITHUB_TOKEN);
-            octokit.repos.createReleaseComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: context.payload.release.id,
-              body: `ISO Hash: \`${hash}\``,
-            });
+      - name: Add release notes and hash
+        run: |
+          release_notes="$(git tag -l ${{ github.ref }} --format='(%contents)')"
+          release_notes+="\n\n| Name | SHA256 |\n| ---- | ------ |\n| ${{ steps.iso_name.outputs.name }} | ${{ steps.hash.outputs.hash }} |"
+          hub release edit ${{ github.ref }} -m "$release_notes"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
