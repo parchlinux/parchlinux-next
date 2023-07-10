@@ -30,14 +30,14 @@ jobs:
       - name: Generate hash
         id: hash
         run: |
-          cd iso/
+          cd out/
           echo "hash=$(sha256sum *.iso | cut -d ' ' -f1)" >> $GITHUB_ENV
 
       - name: Upload ISO artifact
         uses: actions/upload-release-asset@v1
         with:
           upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./iso/
+          asset_path: ./out/
           asset_name: my-artifact-${{ github.ref }}.iso
           asset_content_type: application/octet-stream
           
