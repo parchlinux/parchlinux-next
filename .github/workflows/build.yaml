@@ -1,7 +1,7 @@
-name: Build ISO
+name: Build Parch ISO
 
 on:
-  push:
+  release:
     tags:
       - '*'
 
@@ -11,71 +11,33 @@ jobs:
     container:
       image: archlinux:latest
       options: --privileged
-    outputs:
-      hash: ${{ steps.hash.outputs.hash }}
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
       - name: Install Packages via Pacman
         run: |
-          pacman -Syu --noconfirm archiso reflector rsync curl
+          sudo pacman -Syu --noconfirm archiso reflector rsync curl
+
       - name: Change Arch Docker mirror
         run: |
-          reflector --verbose --country 'United States' -l 5 --sort rate --save /etc/pacman.d/mirrorlist
+          sudo reflector --verbose --country 'United States' -l 5 --sort rate --save /etc/pacman.d/mirrorlist
+
       - name: Build image
         run: |
           mkarchiso -v iso/
+
       - name: Generate hash
         id: hash
         run: |
           cd iso/
           echo "hash=$(sha256sum *.iso | cut -d ' ' -f1)" >> $GITHUB_ENV
-      - name: Create Release
-        id: create_release
-        uses: octokit/request-action@v2.x
-        with:
-          route: POST /repos/${{ github.repository }}/releases
-          mediaType: '{"previews":["symmetra"]}'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Get Upload URL
-        id: get_upload_url
-        run: echo "::set-output name=upload_url::${{ steps.create_release.outputs.data.upload_url }}"
 
       - name: Upload ISO artifact
-        id: upload_asset
         uses: actions/upload-release-asset@v1
         with:
-          upload_url: ${{ steps.get_upload_url.outputs.upload_url }}
-          asset_path: ./iso/*.iso
-          asset_name: my-artifact.iso
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./iso/
+          asset_name: my-artifact-${{ github.ref }}.iso
           asset_content_type: application/octet-stream
-
-  create-release:
-    needs: ['build']
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v3
-      - name: Download artifact
-        uses: actions/download-artifact@v2
-        with:
-          name: iso
-          path: iso
-      - name: Generate hash
-        id: hash
-        run: |
-          cd iso/
-          sha256="$(sha256sum *.iso)"
-          name="$(echo $sha256 | cut -d ' ' -f1)"
-          hash="$(echo $sha256 | cut -d ' ' -f2)"
-          echo "name=${name}" >> $GITHUB_ENV
-          echo "hash=${hash}" >> $GITHUB_ENV
-      - name: Create release
-        run: |
-          gh release create --draft --repo ${{ github.repository }} ${{ github.ref }}
-            iso/*.iso --notes "$(git tag -l ${{ github.ref }} --format='(%contents)') | name | sha256 |
-            | :---: | :---: |
-            | ${{ env.name }} | ${{ env.hash }} |"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
