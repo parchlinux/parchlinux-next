@@ -34,19 +34,18 @@ jobs:
         uses: octokit/request-action@v2.x
         with:
           route: POST /repos/${{ github.repository }}/releases
-          body: |
-            {
-              "tag_name": "${{ github.ref }}",
-              "name": "${{ github.ref }}",
-              "draft": true
-            }
+          mediaType: '{"previews":["symmetra"]}'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Get Upload URL
+        id: get_upload_url
+        run: echo "::set-output name=upload_url::${{ steps.create_release.outputs.data.upload_url }}"
+
       - name: Upload ISO artifact
         id: upload_asset
         uses: actions/upload-release-asset@v1
         with:
-          upload_url: ${{ steps.create_release.outputs.response.data.upload_url }}
+          upload_url: ${{ steps.get_upload_url.outputs.upload_url }}
           asset_path: ./iso/*.iso
           asset_name: my-artifact.iso
           asset_content_type: application/octet-stream
