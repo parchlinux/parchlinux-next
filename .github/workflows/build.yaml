@@ -17,11 +17,11 @@ jobs:
 
       - name: Install Packages via Pacman
         run: |
-          sudo pacman -Syu --noconfirm archiso reflector rsync curl
+          pacman -Syu --noconfirm archiso reflector rsync curl
 
       - name: Change Arch Docker mirror
         run: |
-          sudo reflector --verbose --country 'United States' -l 5 --sort rate --save /etc/pacman.d/mirrorlist
+          reflector --verbose --country 'United States' -l 5 --sort rate --save /etc/pacman.d/mirrorlist
 
       - name: Build image
         run: |
