@@ -40,11 +40,6 @@ jobs:
       - name: Extract ISO file name
         id: iso_name
         run: echo "::set-output name=name::$(basename ${{ github.workspace }}/out/*.iso)"
-      - name: Generate SHA256 hash
-        id: hash
-        run: |
-          sha256="$(sha256sum ${{ github.workspace }}/out/*.iso)"
-          echo "::set-output name=hash::$(echo $sha256 | cut -d ' ' -f1)"
       - name: Create Release
         uses: actions/create-release@v1
         with:
