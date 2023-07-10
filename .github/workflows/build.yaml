@@ -1,8 +1,10 @@
 name: Build ISO
+
 on:
   push:
     tags:
       - '*'
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -10,43 +12,86 @@ jobs:
       image: archlinux:latest
       options: --privileged
     outputs:
-      hash: ${{ steps.hash.outputs.hash }}
+      iso_path: ${{ steps.create-iso.outputs.iso-path }}
+      iso_hash: ${{ steps.create-iso.outputs.iso-hash }}
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
       - name: Install Packages via Pacman
-        run: pacman -Syu archiso reflector rsync curl --noconfirm
-      - name: Change Arch docker mirror
-        run: reflector --verbose --country 'United States' -l 5 --sort rate --save /etc/pacman.d/mirrorlist
-      - name: Build image
+        run: |
+          pacman -Syu archiso reflector rsync curl --noconfirm
+          reflector --verbose --country 'United States' -l 5 --sort rate --save /etc/pacman.d/mirrorlist
+
+      - name: Build ISO
+        id: create-iso
         run: mkarchiso -v iso/
-      - name: generate hash
+
+      - name: Generate ISO Hash
         id: hash
-        run: cd out/ && echo "hash=$(sha256sum *.iso | cut -d ' ' -f1)"  >> $GITHUB_OUTPUT
-      - uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce
+        run: echo "::set-output name=iso-hash::$(sha256sum ${GITHUB_WORKSPACE}/iso/out/*.iso | cut -d ' ' -f1)"
+
+      - name: Set ISO Path Output
+        id: set-iso-path
+        run: echo "::set-output name=iso-path::${GITHUB_WORKSPACE}/iso/out/"
+
+      - name: Upload ISO Artifact
+        uses: actions/upload-artifact@v2
         with:
-          path: ./out/*.iso
+          name: archlinux.iso
+          path: ${{ needs.build.outputs.iso_path }}/*.iso
+
   create-release:
-    needs: ['build']
+    needs: [build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    steps:
-      - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a
-      - name: hash
-        id: hash
-        run: |
-          sha256="$(sha256sum artifact/*.iso)"
-          name="$(echo $sha256 | cut -d ' ' -f1)"
-          hash="$(echo $sha256 | cut -d ' ' -f2)"
 
-      - name: create release
-        run: >
-          gh release create --draft --repo ${{ github.repository }}
-          ${{ github.ref_name }}
-          artifact/*.iso
-          --notes "$(git tag -l ${{github.ref_name}} --format='(%content))'" 
-          "| name | sha256 |" 
-          "| :---: | :---: |" 
-          "| ${name} | ${hash} |" 
+    steps:
+      - name: Download ISO Artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: archlinux.iso
+          path: iso
+
+      - name: Get ISO Hash
+        id: get-iso-hash
+        run: |
+          echo "::set-output name=iso-hash::$(sha256sum ${GITHUB_WORKSPACE}/iso/*.iso | cut -d ' ' -f1)"
+
+      - name: Create Release
+        uses: actions/create-release@v1
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: ${{ github.ref }}
+          draft: false
+          prerelease: false
+
+      - name: Upload ISO to Release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: ${{ github.workspace }}/iso/*.iso
+          asset_name: archlinux.iso
+          asset_content_type: application/octet-stream
+
+      - name: Add ISO Hash to Release Description
+        uses: actions/github-script@v4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          script: |
+            const hash = '${{ needs.create-release.outputs.iso-hash }}';
+            const context = github.context;
+            const octokit = github.getOctokit(process.env.GITHUB_TOKEN);
+            octokit.repos.createReleaseComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: context.payload.release.id,
+              body: `ISO Hash: \`${hash}\``,
+            });
