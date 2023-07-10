@@ -18,7 +18,7 @@ jobs:
       - name: Install Packages via Pacman
         run: |
           pacman -Syu --noconfirm archiso reflector rsync curl
-      - name: Change Arch docker mirror
+      - name: Change Arch Docker mirror
         run: |
           reflector --verbose --country 'United States' -l 5 --sort rate --save /etc/pacman.d/mirrorlist
       - name: Build image
@@ -29,10 +29,24 @@ jobs:
         run: |
           cd iso/
           echo "hash=$(sha256sum *.iso | cut -d ' ' -f1)" >> $GITHUB_ENV
+      - name: Create Release
+        id: create_release
+        uses: octokit/request-action@v2.x
+        with:
+          route: POST /repos/${{ github.repository }}/releases
+          body: |
+            {
+              "tag_name": "${{ github.ref }}",
+              "name": "${{ github.ref }}",
+              "draft": true
+            }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload ISO artifact
+        id: upload_asset
         uses: actions/upload-release-asset@v1
         with:
-          upload_url: ${{ github.event.release.upload_url }}
+          upload_url: ${{ steps.create_release.outputs.response.data.upload_url }}
           asset_path: ./iso/*.iso
           asset_name: my-artifact.iso
           asset_content_type: application/octet-stream
@@ -66,4 +80,3 @@ jobs:
             | ${{ env.name }} | ${{ env.hash }} |"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
