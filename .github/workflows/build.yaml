@@ -1,28 +1,52 @@
-# This workflow will build an Arch Linux ISO file with the commit on it
-name: build parchiso per release
+name: Build ISO
 on:
-  release:
-    types:
-      - created
-
-env:
-  api_key: ${{ secrets.GITHUB_TOKEN }}
-  name: ${{ github.event.repository.name }}
-  release_name: ${{ github.ref_name }}
+  push:
+    tags:
+      - '*'
 jobs:
   build:
     runs-on: ubuntu-latest
     container:
       image: archlinux:latest
       options: --privileged
+    outputs:
+      hash: ${{ steps.hash.outputs.hash }}
     steps:
       - uses: actions/checkout@v3
       - name: Install Packages via Pacman
-        run: pacman -Sy; pacman --noconfirm -S git archiso python python-pygithub reflector
+        run: pacman -Syu archiso reflector rsync curl --noconfirm
       - name: Change Arch docker mirror
-        run: reflector -c "US" -f 12 -l 10 -n 12 --save /etc/pacman.d/mirrorlist
+        run: reflector --verbose --country 'United States' -l 5 --sort rate --save /etc/pacman.d/mirrorlist
       - name: Build image
         run: mkarchiso -v iso/
-      - name: Upload iso to the release
-        run: python tools/upload_asset.py
+      - name: generate hash
+        id: hash
+        run: cd out/ && echo "hash=$(sha256sum *.iso | cut -d ' ' -f1)"  >> $GITHUB_OUTPUT
+      - uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce
+        with:
+          path: ./out/*.iso
+  create-release:
+    needs: ['build']
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a
+      - name: hash
+        id: hash
+        run: |
+          sha256="$(sha256sum artifact/*.iso)"
+          name="$(echo $sha256 | cut -d ' ' -f1)"
+          hash="$(echo $sha256 | cut -d ' ' -f2)"
 
+      - name: create release
+        run: >
+          gh release create --draft --repo ${{ github.repository }}
+          ${{ github.ref_name }}
+          artifact/*.iso
+          --notes "$(git tag -l ${{github.ref_name}} --format='(%content))'" 
+          "| name | sha256 |" 
+          "| :---: | :---: |" 
+          "| ${name} | ${hash} |" 
+        env:
+          GH_TOKEN: ${{ github.token }}
