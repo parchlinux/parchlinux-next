@@ -31,7 +31,7 @@ jobs:
         id: hash
         run: |
           cd out/
-          echo "hash=$(sha256sum *.iso | cut -d ' ' -f1)" >> $GITHUB_ENV
+          echo "hash=$(sha256sum ./**.iso | cut -d ' ' -f1)" >> $GITHUB_ENV
 
       - name: Upload ISO artifact
         uses: actions/upload-release-asset@v1
